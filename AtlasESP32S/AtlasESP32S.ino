@@ -1,15 +1,17 @@
-/*Esta version solo mide corriente*/
-/*La calibracion es variable por promedio*/
+/*Esta version  mide corriente y tension para mejorar el error*/
+/*La calibracion esta fija*/
 
 #include <WiFi.h>
 #include <driver/adc.h>
 
 #define ADC_SCALE 4095 //LE CAMBIE ESTO PORQUE LOS ADC SON DE 12 BITS
 #define VREF 4.5 //tension maxima entregada por el sensor
+#define VREFv 323 //tension maxima entregada por el sensor
 #define DEFAULT_FREQUENCY 50
-#define pin ADC1_CHANNEL_6
+#define pinI ADC1_CHANNEL_6
+#define pinV ADC1_CHANNEL_7
 float sensitivity = 0.066; //ESTE SENSOR ES PARA HASTA 30A
-float zero;
+float zero = 2144;
 
 const char* ssid     = "motorola";
 const char* password = "6e47935c271a";
@@ -23,15 +25,6 @@ void setup() {
   Serial.begin(115200);
    delay(10);
    
-  /*calibrate() saca el promedio de la medicion con I = 0
-  este programa debe iniciar sin carga para realizar correctamente esto*/
-  Serial.flush();
-  Serial.println("Calibrando... Asegúrese de que no fluya corriente a través del sensor en este momento");
-  zero = calibrate();
-  Serial.println("Hecho!");
-  Serial.println(String("Cero de este sensor = ") + zero);
-  
-  
   /*Parte WIFI*/
 
   Serial.println();
@@ -49,10 +42,10 @@ void setup() {
   WiFi.begin(ssid, password);
 // WiFi.begin("CIME", "1@labocime2008");
 
-while (WiFi.status() != WL_CONNECTED) {
+/*while (WiFi.status() != WL_CONNECTED) {
         delay(500);
         Serial.print(".");
-    }
+    }*/
 
     Serial.println("");
     Serial.println("WiFi connected");
@@ -63,9 +56,10 @@ while (WiFi.status() != WL_CONNECTED) {
 
 void loop() {
 
-  float U = 220;
+  float U = getVoltageAC(DEFAULT_FREQUENCY);
   float I = getCurrentAC(DEFAULT_FREQUENCY);
   float P = U * I;
+  Serial.println(String("V = ") + U + " V");
   Serial.println(String("I = ") + I + " A");
   Serial.println(String("P = ") + P + " Watts");
   
@@ -117,22 +111,6 @@ void loop() {
 
 }
 
-
-float calibrate() {
-  uint32_t acc = 0, acc1=0;
-  for (int i = 0; i < 10; i++) {
-    adc1_config_width(ADC_WIDTH_BIT_12);
-    adc1_config_channel_atten(pin , ADC_ATTEN_DB_0);
-    acc += adc1_get_raw(pin);
-    delay(500);
-  }
-  
-  zero = 2144;
-  //zero = acc / 10;
-  return zero;
-}
-
-
 float getCurrentAC(uint16_t frequency) {
   uint32_t period = 1000000 / frequency;
   uint32_t t_start = micros();
@@ -142,7 +120,7 @@ float getCurrentAC(uint16_t frequency) {
   //uint16_t Inow = 0;
 
   while (micros() - t_start < period) {
-    Inow = adc1_get_raw(pin) - zero;
+    Inow = adc1_get_raw(pinI) - zero;
     //Serial.println(String("Inow = ") + Inow);
     Isum += Inow*Inow;
     //Serial.println(String("Isum = ") + Isum);
@@ -153,4 +131,28 @@ float getCurrentAC(uint16_t frequency) {
   
   //Serial.println(String("contador de mediciones = ") + measurements_count);
   return Irms;
+}
+
+float getVoltageAC(uint16_t frequency) {
+  uint32_t period = 1000000 / frequency;
+  uint32_t t_start = micros();
+
+  uint32_t Vsum = 0, measurements_count = 0;
+  int32_t Vnow;
+
+  while (1)
+  {
+     while (micros() - t_start < period) {
+    Vnow = adc1_get_raw(pinV);
+    //Serial.println(String("Inow = ") + Inow);
+    Vsum += Vnow*Vnow;
+    //Serial.println(String("Isum = ") + Isum);
+    measurements_count++;
+  }
+
+  float Vrms = sqrt(Vsum / measurements_count) / ADC_SCALE * VREFv ;
+  
+  Serial.println(String("tensiones = ") + Vrms);
+  return Vrms; 
+  }
 }
