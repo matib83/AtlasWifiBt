@@ -1,8 +1,7 @@
-/*
-  Este programa calcula el consumo electrico con el sensor AC712 de 5A
-  y los procesa con el ESP8266 (sin funciones de WIFI)
-*/
+/*Esta version solo mide corriente*/
+/*La calibracion es variable por promedio*/
 
+#include <WiFi.h>
 #include <driver/adc.h>
 
 #define ADC_SCALE 4095 //LE CAMBIE ESTO PORQUE LOS ADC SON DE 12 BITS
@@ -12,51 +11,127 @@
 float sensitivity = 0.066; //ESTE SENSOR ES PARA HASTA 30A
 float zero;
 
+const char* ssid     = "motorola";
+const char* password = "6e47935c271a";
+const char* host = "api.thingspeak.com";
+const char* streamId   = "/update/";
+const char* privateKey = "KQG9ZA6G41Z0JSC6";
+
+
 void setup() {
-  Serial.begin(9600);
-  //calibrate() saca el promedio de la medicion con I = 0
-  //este programa debe iniciar sin carga para realizar correctamente esto
+
+  Serial.begin(115200);
+   delay(10);
+   
+  /*calibrate() saca el promedio de la medicion con I = 0
+  este programa debe iniciar sin carga para realizar correctamente esto*/
   Serial.flush();
   Serial.println("Calibrando... Asegúrese de que no fluya corriente a través del sensor en este momento");
+  zero = calibrate();
+  Serial.println("Hecho!");
+  Serial.println(String("Cero de este sensor = ") + zero);
   
-  zero = calibrate();
-  Serial.println("Hecho!");
-  Serial.println(String("Cero de este sensor = ") + zero);
- 
- while(1){
-  zero = calibrate();
-  Serial.println("Hecho!");
-  Serial.println(String("Cero de este sensor = ") + zero);
-  delay(2000);
- }
+  
+  /*Parte WIFI*/
+
+  Serial.println();
+  Serial.println();
+  Serial.println();
+
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+  /*for (uint8_t t = 4; t > 0; t--) {
+    Serial.printf("[SETUP] WAIT %d...\n", t);
+    Serial.flush();
+    delay(1000);
+  }*/
+
+  WiFi.begin(ssid, password);
+// WiFi.begin("CIME", "1@labocime2008");
+
+while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+    }
+
+    Serial.println("");
+    Serial.println("WiFi connected");
+    Serial.println("IP address: ");
+    Serial.println(WiFi.localIP());
   
 }
 
 void loop() {
-  
+
   float U = 220;
   float I = getCurrentAC(DEFAULT_FREQUENCY);
   float P = U * I;
-
   Serial.println(String("I = ") + I + " A");
   Serial.println(String("P = ") + P + " Watts");
+  
+ Serial.print("connecting to ");
+    Serial.println(host);
 
-  delay(1000);
+    // Use WiFiClient class to create TCP connections
+    WiFiClient client;
+    const int httpPort = 80;
+    if (!client.connect(host, httpPort)) {
+        Serial.println("connection failed");
+        return;
+    }
 
- 
+    // We now create a URI for the request
+    
+    String url = streamId;
+    url += "?api_key=";
+    url += privateKey;
+    url += "&field1=";
+    url += I;
+
+    Serial.print("Requesting URL: ");
+    Serial.println(url);
+
+    // This will send the request to the server
+    client.print(String("GET ") + url + " HTTP/1.1\r\n" +
+                 "Host: " + host + "\r\n" +
+                 "Connection: close\r\n\r\n");
+    unsigned long timeout = millis();
+    while (client.available() == 0) {
+        if (millis() - timeout > 5000) {
+            Serial.println(">>> Client Timeout !");
+            client.stop();
+            return;
+        }
+    }
+
+    // Read all the lines of the reply from server and print them to Serial
+    while(client.available()) {
+        String line = client.readStringUntil('\r');
+        Serial.print(line);
+    }
+
+    Serial.println();
+    Serial.println("closing connection"); 
+
+     delay(60000);
+
 }
+
 
 float calibrate() {
   uint32_t acc = 0, acc1=0;
-  for (int i = 0; i < 60; i++) {
+  for (int i = 0; i < 10; i++) {
     adc1_config_width(ADC_WIDTH_BIT_12);
     adc1_config_channel_atten(pin , ADC_ATTEN_DB_0);
     acc += adc1_get_raw(pin);
     delay(500);
   }
-  zero = acc / 60;
+  
+  zero = 2144;
+  //zero = acc / 10;
   return zero;
 }
+
 
 float getCurrentAC(uint16_t frequency) {
   uint32_t period = 1000000 / frequency;
